@@ -1,8 +1,10 @@
 #! /usr/bin/python3
 
 import rosbag
-import texttable
+#import texttable
 import json
+import sys
+import os
 
 def extract_topics(bag_file):
 	return bag_file.get_type_and_topic_info().topics
@@ -82,13 +84,10 @@ def range_by_cost(parents_children_dict,frames_and_costs):
 					total_cost += cost
 			out_d.append((parent,child,total_cost))
 	out_d.sort(key = lambda x: x[2],reverse = True)
-	#sorted_parents = [elem[0] for elem in out_d]
-	#sorted_children = [elem[1] for elem in out_d]
-	#return sorted_parents,sorted_children
 	return [[elem[0], elem[1]] for elem in out_d]
 	
 def match_topic_types(items):
-	topicmatches = {'camera':[],
+	topicmatches = {'camera':[], 
 	                'camera_left':[],
 	                'camera_right':[],
 	                'camera_depth':[],
@@ -144,25 +143,63 @@ def match_topic_types(items):
 						topicscores[score][i] -= 1 # if so, subtract from score
 						break
 
-	#print(topicscores) # includes positivee and negative scores
+	#print(topicscores) # includes positive and negative scores
 
-	assignment = {'camera':[], 'camera_left':[], 'camera_right':[], 'camera_depth':[], 'laser_scan':[], 'imu':[], 'odometry':[]} # final assignment
+	assignment = {'camera':[],
+	              'camera_left':[],
+	              'camera_right':[],
+	              'camera_depth':[],
+	              'laser_scan':[],
+	              'imu':[],
+	              'odometry':[]} # final assignment
 	for score in topicscores: # assign topics
 		scores = [(topicscores[score][i], i) for i in range(len(topicscores[score]))]
-		scores_sorted = reversed(sorted(scores))
+		scores_sorted = sorted(scores, reverse=True)
 		for s in scores_sorted:
 			idx = s[1]
-			assignment[score].append(topicmatches[score][idx])
+			if score != 'camera_depth' or ('depth' in topicmatches[score][idx]): # don't add for depth camera unless 'depth' in name
+				assignment[score].append(topicmatches[score][idx]) # can alternatively recalculate positive score and check if above threshold
 
 	'''with open(fileloc, 'w') as f:
 		f.write(json.dumps(assignment))'''
 
 	return assignment
 
-bag=rosbag.Bag("/home/user/data/2011-01-25-06-29-26.bag")
+def create_file(bag_file_path):
+	bag=rosbag.Bag(bag_file_path)
+	topics = extract_topics(bag)
+	assignments = match_topic_types(topics.items())
+	frames_dict,frames_roots = tree_frames(bag)
+	laser_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["laser","robot","base"])
+	camera_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["cam","stereo","robot","base"])
+	laser_costs = {"world":1, "odom":1, "laser":1, "robot":0.5, "base":0.5}
+	camera_costs = {"world":1, "odom":0.5, "cam":2, "stereo":1, "robot":0.5, "base":0.5}
+	assignments["laser_tf"] = range_by_cost(laser_frames, laser_costs)
+	assignments["camera_tf"] = range_by_cost(camera_frames, camera_costs)
+	return json.dumps(assignments)
+
+if __name__ == '__main__':
+	# usage:
+	# ./bag_info.py <path_to_bag> <name_for_json_file>=SCREEN(by default)
+	if len(sys.argv) != 2 and len(sys.argv) != 3:
+		print("usage:\n./bag_info.py <path_to_bag> <path_for_json_file>=SCREEN(by default)")
+	path_to_bag = sys.argv[1]
+	if len(sys.argv) == 3:
+		file = open(sys.argv[2],'w')
+		file.write(create_file(path_to_bag))
+	else:
+		print(create_file(path_to_bag))
+	
+	
+		
+		
+
+
+'''
+#bag=rosbag.Bag("/home/user/data/2011-01-25-06-29-26.bag")
 #bag=rosbag.Bag("/home/user/data/2011-01-27-07-49-54.bag")
 #bag=rosbag.Bag("/home/user/data/2011-04-11-07-34-27.bag")
-#bag=rosbag.Bag("/home/user/data/rgbd_dataset_freiburg2_pioneer_360.bag")
+bag=rosbag.Bag("/home/user/data/rgbd_dataset_freiburg2_pioneer_360.bag")
 topics = extract_topics(bag)
 assignments = match_topic_types(topics.items())
 print(assignments)
@@ -201,4 +238,4 @@ assignments["camera_tf"] = range_by_cost(camera_frames, camera_costs)
 print("####################total###################")
 print(assignments)
 with open('file.json', 'w') as f:
-	f.write(json.dumps(assignments))
+	f.write(json.dumps(assignments))'''
