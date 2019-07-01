@@ -5,6 +5,7 @@ import rosbag
 import json
 import sys
 import os
+from difflib import SequenceMatcher
 
 def extract_topics(bag_file):
 	return bag_file.get_type_and_topic_info().topics
@@ -86,7 +87,10 @@ def range_by_cost(parents_children_dict,frames_and_costs):
 	out_d.sort(key = lambda x: x[2],reverse = True)
 	return [[elem[0], elem[1]] for elem in out_d]
 	
-def match_topic_types(items):
+def similar(a, b):
+    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+	
+def match_topic_types(bag):
 	topicmatches = {'camera':[], 
 	                'camera_left':[],
 	                'camera_right':[],
@@ -104,11 +108,20 @@ def match_topic_types(items):
 	              'laser_scan':('sensor_msgs/LaserScan', [('base',1), ('scan',2), ('laser', 1), ('robot', 1)]), 
 	              'imu':('sensor_msgs/Imu',[('0',1)]), 
 	              'odometry':('nav_msgs/Odometry',[('',1)])} 
+	cam_topics = [] # to hold cameras
+	cam_info_topics = [] # to hold CameraInfo topics
+
+	topics = extract_topics(bag)
+	items = topics.items()
 
 	for topic, info in items: # loop over topics
 		for match in topicmatches:
 			if info.msg_type in topictypes[match][0]: # if topic has correct message type
 				topicmatches[match].append(topic) # append it to matches
+			if info.msg_type == 'sensor_msgs/Image': # add cameras and cameraInfo
+				cam_topics.append(topic)
+			elif info.msg_type == 'sensor_msgs/CameraInfo':
+				cam_info_topics.append(topic)
 
 	topicscores = {'camera':[],
 	               'camera_left':[],
@@ -126,7 +139,7 @@ def match_topic_types(items):
 			for m in topictypes[score][1]: # add some to score if there's a keyword match
 				if m[0] in topicmatches[score][i]:
 					if m[0] != '':
-						topicscores[score][i] += 1/s * m[1]
+						topicscores[score][i] += 1.0/s * m[1]
 
 	#print(topicscores) # positive scores
 
@@ -157,18 +170,53 @@ def match_topic_types(items):
 		scores_sorted = sorted(scores, reverse=True)
 		for s in scores_sorted:
 			idx = s[1]
-			if score != 'camera_depth' or ('depth' in topicmatches[score][idx]): # don't add for depth camera unless 'depth' in name
+			if ((score != 'camera_depth' or ('depth' in topicmatches[score][idx])) and
+				(score != 'camera_right' or ('left' not in topicmatches[score][idx])) and
+				(score != 'camera_left' or ('right' not in topicmatches[score][idx]))): # don't add for depth camera unless 'depth' in name
 				assignment[score].append(topicmatches[score][idx]) # can alternatively recalculate positive score and check if above threshold
 
-	'''with open(fileloc, 'w') as f:
-		f.write(json.dumps(assignment))'''
+	info_assignment = {}
+
+	# so far observed that CameraInfo topic names are very similar to corresponding image names
+	# except they may contain the word 'info' somewhere, so for every topic with type CameraInfo, can
+	# find the most similar topic name with type Image using Python built-in function (from difflib)
+	for info in cam_info_topics:
+		best = (0,0)
+		for i in range(len(cam_topics)): # find the most similar topic name with type sensor_msgs/Image
+			sim = similar(info.lower(), cam_topics[i].lower())
+			if sim > best[0]:
+				best = (sim, i)
+		info_assignment[info] = cam_topics[best[1]] # make assignment
+
+	assignment['camera_intrinsics'] = {}
+	for info in info_assignment: # call get_camera_info and append results to final assignment
+		assignment['camera_intrinsics'][info_assignment[info]] = get_camera_info(bag, info)
 
 	return assignment
+
+def get_camera_info(bag, topic): # returns a dictionary of message attributes for topics with type CameraInfo
+	def str_to_dict(lines): # helper: turn a list of words separated by a colon into a dictionary
+		dct = {}
+		for line in lines: # loop over lines
+			split = line.split(':', 1) # split by the first colon
+			if split[1].strip() != '' and split[0][0] != ' ':
+				dct[split[0].strip()] = eval(split[1].strip()) # evaluate string and add to dictionary
+		return dct
+
+	cam_info = {}
+	for tp, msg, t in bag.read_messages(topics=[topic]): # loop over messages (will read only one message)
+		text = str(msg)
+		lines = text.split('\n')
+		cam_info = str_to_dict(lines[6:15]) # turn lines 6-14 of str(msg) into dictionary
+		cam_info['roi'] = str_to_dict((str(msg.roi)).split('\n')) # add dictionary properties to cam_info
+		#cam_info['header'] = str_to_dict((str(msg.header)).split('\n'))
+		#cam_info['header']['stamp'] = {'secs':msg.header.stamp.secs, 'nsecs':msg.header.stamp.nsecs}
+		return cam_info
 
 def create_file(bag_file_path):
 	bag=rosbag.Bag(bag_file_path)
 	topics = extract_topics(bag)
-	assignments = match_topic_types(topics.items())
+	assignments = match_topic_types(bag)
 	frames_dict,frames_roots = tree_frames(bag)
 	laser_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["laser","robot","base"])
 	camera_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["cam","stereo","robot","base"])
@@ -190,10 +238,6 @@ if __name__ == '__main__':
 	else:
 		print(create_file(path_to_bag))
 	
-	
-		
-		
-
 
 '''
 #bag=rosbag.Bag("/home/user/data/2011-01-25-06-29-26.bag")
@@ -210,17 +254,14 @@ for topic, info in topics.items():                                              
 	tab.add_row((topic,info.msg_type,info.message_count,info.connections,info.frequency)) #
 print(tab.draw())                                                                             #
 ###############################################################################################
-
 frames_dict,frames_roots = tree_frames(bag)
 ######## print tf frames #############
 print_tree(frames_dict,frames_roots) #
 ######################################
-
 laser_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["laser","robot","base"])
 camera_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["cam","stereo","robot","base"])
 laser_costs = {"world":1, "odom":1, "laser":1, "robot":0.5, "base":0.5}
 camera_costs = {"world":1, "odom":0.5, "cam":2, "stereo":1, "robot":0.5, "base":0.5}
-
 print("laser frames:")
 #laser_parents, laser_children = range_by_cost(laser_frames, laser_costs)
 #assignments["laser_world_tf_frame"] = laser_parents
@@ -234,7 +275,6 @@ print("camera frames:")
 #assignments["camera_base_tf_frame"] = camera_children
 #print(camera_parents, camera_children)
 assignments["camera_tf"] = range_by_cost(camera_frames, camera_costs)
-
 print("####################total###################")
 print(assignments)
 with open('file.json', 'w') as f:
