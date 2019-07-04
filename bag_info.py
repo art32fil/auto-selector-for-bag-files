@@ -49,8 +49,9 @@ def find_frame(frame_dict,frame_root,name,out_frames_list):
 		find_frame(frame_dict,child,name,out_frames_list)
 			
 
-def extract_parrent_and_child_frames(frame_dict, frame_roots, parent_frames, child_frames):
+def extract_parrent_and_child_frames(frame_dict, frame_roots, parent_frames, child_frames, unwanted_child_frames=[]):
 	d = {}
+	unwanted_child_frames.append("hack") #should be here
 	for root in frame_roots:		
 		for possible_world_frame in parent_frames:
 			world_frames = []
@@ -62,8 +63,10 @@ def extract_parrent_and_child_frames(frame_dict, frame_roots, parent_frames, chi
 					current_frames = []
 					find_frame(frame_dict,world_frame,possible_child_frame,current_frames)
 					for current_frame in current_frames:
-						if current_frame not in d[world_frame]:
-							d[world_frame].append(current_frame)
+						for unwanted_child_frame in unwanted_child_frames:
+							if unwanted_child_frame not in current_frame:
+								if current_frame not in d[world_frame]:
+									d[world_frame].append(current_frame)
 	return d
 
 def print_tree_recursive(d,name,height):
@@ -219,12 +222,21 @@ def create_file(bag_file_path):
 	assignments = match_topic_types(bag)
 	frames_dict,frames_roots = tree_frames(bag)
 	laser_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["laser","robot","base"])
-	camera_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["cam","stereo","robot","base"])
+	camera_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["rgb","cam","stereo","robot","base","wheel"])
+	left_camera_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["rgb","left_camera","left","l_c","_l/","/l_","_l_","cam","stereo"],["robot","base","wheel","finger","depth","_d_","right","_r_","/r_","_r/"])
+	right_camera_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["rgb","right_camera","right","r_c","_r/","/r_","_r_","cam","stereo"],["robot","base","wheel","finger","depth","_d_","left","_l_","/l_","_l/"])
+	depth_camera_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["depth","_d_","_d/","/d_"],["robot","base"])
 	laser_costs = {"world":1, "odom":1, "laser":1, "robot":0.5, "base":0.5}
-	camera_costs = {"world":1, "odom":0.5, "cam":2, "stereo":1, "robot":0.5, "base":0.5}
+	camera_costs = {"rgb":1,"world":1, "odom":0.5, "cam":2, "stereo":1, "robot":0.5, "base":0.5,"left":-1,"right":-1,"_l_":-1,"_r_":-1,"/l_":-1,"/r_":-1,"_l/":-1,"_r/":-1,"double":2,"pair":2}
+	left_camera_costs = {"rgb":1,"left_camera":2,"left":2,"l_c":1,"_l/":1,"/l_":1,"_l_":1,"cam":1,"stereo":1,"robot":0.5,"base":0.5,"wheel":-2,"right":-2,"_r_":-2}
+	right_camera_costs = {"rgb":1,"right_camera":2,"right":2,"r_c":1,"_r/":1,"/r_":1,"_r_":1,"cam":1,"stereo":1,"robot":0.5,"base":0.5,"wheel":-2,"left":-2,"_l_":-2}
+	depth_camera_costs = {"depth":2,"_d_":2,"world":1, "odom":0.5, "cam":2, "stereo":1, "robot":0.5, "base":0.5}
 	assignments["laser_tf"] = range_by_cost(laser_frames, laser_costs)
 	assignments["camera_tf"] = range_by_cost(camera_frames, camera_costs)
-	return json.dumps(assignments)
+	assignments["camera_left_tf"] = range_by_cost(left_camera_frames, left_camera_costs)
+	assignments["camera_right_tf"] = range_by_cost(right_camera_frames, right_camera_costs)
+	assignments["camera_depth_tf"] = range_by_cost(depth_camera_frames, depth_camera_costs)
+	return json.dumps(assignments,separators=(',', ':'))
 
 if __name__ == '__main__':
 	# usage:
@@ -237,6 +249,7 @@ if __name__ == '__main__':
 		file.write(create_file(path_to_bag))
 	else:
 		print(create_file(path_to_bag))
+
 	
 
 '''
