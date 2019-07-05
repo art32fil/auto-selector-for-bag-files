@@ -206,6 +206,15 @@ def get_camera_info(bag, topic): # returns a dictionary of message attributes fo
 				dct[split[0].strip()] = eval(split[1].strip()) # evaluate string and add to dictionary
 		return dct
 
+	def frame_rate(tpc, size=20):
+		frames = []
+		for tp, msg, t in bag.read_messages(topics=tpc): # loop over messages (will read only one message)
+			if size < 1:
+				break
+			frames.append(msg.header.stamp.to_sec())
+			size -= 1
+		return (len(frames)-1)/(frames[-1] - frames[0])
+
 	cam_info = {}
 	for tp, msg, t in bag.read_messages(topics=[topic]): # loop over messages (will read only one message)
 		text = str(msg)
@@ -214,6 +223,7 @@ def get_camera_info(bag, topic): # returns a dictionary of message attributes fo
 		cam_info['roi'] = str_to_dict((str(msg.roi)).split('\n')) # add dictionary properties to cam_info
 		#cam_info['header'] = str_to_dict((str(msg.header)).split('\n'))
 		#cam_info['header']['stamp'] = {'secs':msg.header.stamp.secs, 'nsecs':msg.header.stamp.nsecs}
+		cam_info['frame_rate'] = int(round(frame_rate([topic])))
 		return cam_info
 
 def create_file(bag_file_path):
