@@ -235,7 +235,7 @@ def get_camera_info(bag, topic, cam): # returns a dictionary of message attribut
 		cam_info['roi'] = str_to_dict((str(msg.roi)).split('\n')) # add dictionary properties to cam_info
 		#cam_info['header'] = str_to_dict((str(msg.header)).split('\n'))
 		#cam_info['header']['stamp'] = {'secs':msg.header.stamp.secs, 'nsecs':msg.header.stamp.nsecs}
-		print('***', cam)
+		#print('***', cam)
 		cam_info['frame_rate'] = int(round(frame_rate2([cam])))
 		return cam_info
 
