@@ -6,6 +6,8 @@ import json
 import sys
 import os
 from difflib import SequenceMatcher
+import rospy
+import random
 
 def extract_topics(bag_file):
 	return bag_file.get_type_and_topic_info().topics
@@ -193,11 +195,11 @@ def match_topic_types(bag):
 
 	assignment['camera_intrinsics'] = {}
 	for info in info_assignment: # call get_camera_info and append results to final assignment
-		assignment['camera_intrinsics'][info_assignment[info]] = get_camera_info(bag, info)
+		assignment['camera_intrinsics'][info_assignment[info]] = get_camera_info(bag, info, info_assignment[info])
 
 	return assignment
 
-def get_camera_info(bag, topic): # returns a dictionary of message attributes for topics with type CameraInfo
+def get_camera_info(bag, topic, cam): # returns a dictionary of message attributes for topics with type CameraInfo
 	def str_to_dict(lines): # helper: turn a list of words separated by a colon into a dictionary
 		dct = {}
 		for line in lines: # loop over lines
@@ -206,24 +208,35 @@ def get_camera_info(bag, topic): # returns a dictionary of message attributes fo
 				dct[split[0].strip()] = eval(split[1].strip()) # evaluate string and add to dictionary
 		return dct
 
-	def frame_rate(tpc, size=20):
-		frames = []
-		for tp, msg, t in bag.read_messages(topics=tpc): # loop over messages (will read only one message)
-			if size < 1:
+	def frame_rate2(tpc, samples=15, size=2, max_tries=50):
+		rates = []
+		while samples > 0:
+			if max_tries < 1 or samples < 1:
 				break
-			frames.append(msg.header.stamp.to_sec())
-			size -= 1
-		return (len(frames)-1)/(frames[-1] - frames[0])
+			start = random.randint(int(bag.get_start_time() * 1000), int(bag.get_end_time() * 1000))
+			try:
+				msg_gen = bag.read_messages(topics = tpc, start_time=rospy.Time.from_sec(start/1000))
+				frames = [msg_gen.next()[1].header.stamp.to_sec(), msg_gen.next()[1].header.stamp.to_sec()] # may generate StopIteration error
+				rates.append((size-1)/(frames[-1] - frames[0])) # divide by zero error
+				samples -= 1
+			except:
+				continue
+			max_tries -= 1
+
+		rates.sort()
+		return 0 if len(rates) < 1 else sum(rates)/len(rates)
 
 	cam_info = {}
-	for tp, msg, t in bag.read_messages(topics=[topic]): # loop over messages (will read only one message)
+	midtime = (bag.get_start_time() + bag.get_end_time()) / 2.0
+	for tp, msg, t in bag.read_messages(topics=[topic], start_time=rospy.Time.from_sec(midtime)): # loop over messages (will read only one message)
 		text = str(msg)
 		lines = text.split('\n')
 		cam_info = str_to_dict(lines[6:15]) # turn lines 6-14 of str(msg) into dictionary
 		cam_info['roi'] = str_to_dict((str(msg.roi)).split('\n')) # add dictionary properties to cam_info
 		#cam_info['header'] = str_to_dict((str(msg.header)).split('\n'))
 		#cam_info['header']['stamp'] = {'secs':msg.header.stamp.secs, 'nsecs':msg.header.stamp.nsecs}
-		cam_info['frame_rate'] = int(round(frame_rate([topic])))
+		print('***', cam)
+		cam_info['frame_rate'] = int(round(frame_rate2([cam])))
 		return cam_info
 
 def create_file(bag_file_path):
