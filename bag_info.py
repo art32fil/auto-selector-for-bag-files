@@ -213,6 +213,7 @@ def get_camera_info(bag, topic, cam): # returns a dictionary of message attribut
 		while samples > 0:
 			if max_tries < 1 or samples < 1:
 				break
+			max_tries -= 1
 			start = random.randint(int(bag.get_start_time() * 1000), int(bag.get_end_time() * 1000))
 			try:
 				msg_gen = bag.read_messages(topics = tpc, start_time=rospy.Time.from_sec(start/1000))
@@ -221,7 +222,6 @@ def get_camera_info(bag, topic, cam): # returns a dictionary of message attribut
 				samples -= 1
 			except:
 				continue
-			max_tries -= 1
 
 		rates.sort()
 		return 0 if len(rates) < 1 else sum(rates)/len(rates)
