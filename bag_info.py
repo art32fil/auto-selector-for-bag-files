@@ -20,7 +20,7 @@ def tree_frames(bag_file):
 	frames_roots = [] #
 
 	# go for all messages in tf
-	for topic, msg, t in bag_file.read_messages(topics=["/tf"]):
+	for topic, msg, t in bag_file.read_messages(topics=["/tf","tf"]):
 		# cut first seconds
 		if first_message == True:
 			begin_time = t.secs
