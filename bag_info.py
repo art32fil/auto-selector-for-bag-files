@@ -51,19 +51,19 @@ def find_frame(frame_dict,frame_root,name,out_frames_list):
 		find_frame(frame_dict,child,name,out_frames_list)
 			
 
-def extract_parrent_and_child_frames(frame_dict, frame_roots, parent_frames, child_frames, unwanted_child_frames=[]):
+def extract_parrent_and_child_frames(frame_dict, frame_roots, wanted_parent_frames, wanted_child_frames, unwanted_child_frames=[]):
 	d = {}
 	unwanted_child_frames.append("hack") #should be here
 	for root in frame_roots:		
-		for possible_world_frame in parent_frames:
+		for wanted_world_frame in wanted_parent_frames:
 			world_frames = []
-			find_frame(frame_dict,root,possible_world_frame,world_frames)
+			find_frame(frame_dict,root,wanted_world_frame,world_frames)
 			for world_frame in world_frames:
 				if world_frame not in d:
 					d[world_frame] = []
-				for possible_child_frame in child_frames:
+				for wanted_child_frame in wanted_child_frames:
 					current_frames = []
-					find_frame(frame_dict,world_frame,possible_child_frame,current_frames)
+					find_frame(frame_dict,world_frame,wanted_child_frame,current_frames)
 					for current_frame in current_frames:
 						for unwanted_child_frame in unwanted_child_frames:
 							if unwanted_child_frame not in current_frame:
@@ -94,7 +94,19 @@ def range_by_cost(parents_children_dict,frames_and_costs):
 	
 def similar(a, b):
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
-	
+
+def extract_tf_frame(bag_file,topic):
+	topic_frame = {}
+	for t, msg, time in bag_file.read_messages(topics=[topic]):
+		try:
+			topic_frame = msg.header.frame_id
+			#print ("for topic", topic, "msg.header.frame_id =", topic_frame)
+		except AttributeError:
+			#print('There is no msg.header.frame_id for message\n',msg)
+			topic_frame = ""
+		break
+	return topic_frame
+
 def match_topic_types(bag):
 	topicmatches = {'camera':[], 
 	                'camera_left':[],
@@ -239,13 +251,71 @@ def get_camera_info(bag, topic, cam): # returns a dictionary of message attribut
 		cam_info['frame_rate'] = int(round(frame_rate2([cam])))
 		return cam_info
 
-def create_file(bag_file_path):
-	bag=rosbag.Bag(bag_file_path)
-	topics = extract_topics(bag)
-	assignments = match_topic_types(bag)
+def match_tf_types(bag, assignments):
+	def find_possible_tf_frames_for_topic(bag, frames_dict, frames_roots,
+	                                      assignments, assignments_item, assignments_tf_item,
+	                                      wanted_world_frames, wanted_child_frames, unwanted_child_frames = ["hack"], #hack should be here
+	                                      frames_costs = {}):
+		tf_list = []
+		assignments[assignments_tf_item] = []
+		for topic in assignments[assignments_item]:
+			tf_frame = extract_tf_frame(bag, topic)
+			#print ("222")
+			if tf_frame == "":
+				#print ("111")
+				frames = extract_parrent_and_child_frames(frames_dict, frames_roots, wanted_world_frames, wanted_child_frames, unwanted_child_frames)
+			else:
+				#print (tf_frame)
+				frames = extract_parrent_and_child_frames(frames_dict, frames_roots, wanted_world_frames, [tf_frame])
+			assignments[assignments_tf_item].append(range_by_cost(frames, frames_costs))
 	frames_dict,frames_roots = tree_frames(bag)
-	laser_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["laser","robot","base"])
-	camera_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["rgb","cam","stereo","robot","base","wheel"])
+	# print_tree(frames_dict,frames_roots) #
+	
+	find_possible_tf_frames_for_topic(bag, frames_dict, frames_roots, assignments, "laser_scan", "laser_tf",
+                                          wanted_world_frames = ["world","odom"],wanted_child_frames = ["laser","robot","base"],
+	                                  frames_costs = {"world":1, "odom":1, "laser":1, "robot":0.5, "base":0.5})
+	find_possible_tf_frames_for_topic(bag, frames_dict, frames_roots, assignments, "camera", "camera_tf",
+                                          wanted_world_frames = ["world","odom"], wanted_child_frames = ["rgb","cam","stereo","robot","base"], 
+	                                  unwanted_child_frames = ["depth","wheel"],
+	                                  frames_costs = {"rgb":1,"world":1, "odom":0.5, "cam":2, "stereo":1, "robot":0.5, "base":0.5,"left":-1,"right":-1,"_l_":-1,"_r_":-1,"/l_":-1,"/r_":-1,"_l/":-1,"_r/":-1,"double":2,"pair":2})
+	find_possible_tf_frames_for_topic(bag, frames_dict, frames_roots, assignments, "camera_left", "camera_left_tf",
+                                          wanted_world_frames = ["world","odom"], wanted_child_frames = ["rgb","left_camera","left","l_c","_l/","/l_","_l_","cam","stereo"], 
+	                                  unwanted_child_frames = ["robot","base","wheel","finger","depth","_d_","right","_r_","/r_","_r/"],
+	                                  frames_costs = {"rgb":1,"left_camera":2,"left":2,"l_c":1,"_l/":1,"/l_":1,"_l_":1,"cam":1,"stereo":1,"robot":0.5,"base":0.5,"wheel":-2,"right":-2,"_r_":-2})
+	find_possible_tf_frames_for_topic(bag, frames_dict, frames_roots, assignments, "camera_right", "camera_right_tf",
+                                          wanted_world_frames = ["world","odom"], wanted_child_frames = ["rgb","right_camera","right","r_c","_r/","/r_","_r_","cam","stereo"], 
+	                                  unwanted_child_frames = ["robot","base","wheel","finger","depth","_d_","left","_l_","/l_","_l/"],
+	                                  frames_costs = {"rgb":1,"right_camera":2,"right":2,"r_c":1,"_r/":1,"/r_":1,"_r_":1,"cam":1,"stereo":1,"robot":0.5,"base":0.5,"wheel":-2,"left":-2,"_l_":-2})
+	find_possible_tf_frames_for_topic(bag, frames_dict, frames_roots, assignments, "camera_depth", "camera_depth_tf",
+                                          wanted_world_frames = ["world","odom"], wanted_child_frames = ["depth","_d_","_d/","/d_"], 
+	                                  unwanted_child_frames = ["robot","base"],
+	                                  frames_costs = {"depth":2,"_d_":2,"world":1, "odom":0.5, "cam":2, "stereo":1, "robot":0.5, "base":0.5})
+	'''laser_tf_list = []
+	for laser_topic in assignments["laser_scan"]:
+		laser_tf_frame = extract_tf_frame(bag,laser_topic)
+		if laser_tf_frame is None:
+			laser_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["laser","robot","base"])
+		else:
+			laser_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],[laser_tf_frame])
+		laser_costs = {"world":1, "odom":1, "laser":1, "robot":0.5, "base":0.5}
+		assignments["laser_tf"] = range_by_cost(laser_frames, laser_costs)
+	# camera
+	camera_tf_list = []
+	for camera_topic in assignments["camera"]:
+		camera_tf_frame = extract_tf_frame(bag,camera_topic)
+		if camera_tf_frame is None:
+			camera_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["rgb","cam","stereo","robot","base"],["depth","wheel"])
+		else:
+			camera_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],[camera_tf_frame])
+		camera_costs = {"rgb":1,"world":1, "odom":0.5, "cam":2, "stereo":1, "robot":0.5, "base":0.5,"left":-1,"right":-1,"_l_":-1,"_r_":-1,"/l_":-1,"/r_":-1,"_l/":-1,"_r/":-1,"double":2,"pair":2}
+		assignments["camera_tf"] = range_by_cost(camera_frames, camera_costs)
+	# camera left
+	# camera right
+	# camera depth
+	
+	
+	
+	camera_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["rgb","cam","stereo","robot","base","wheel"],["depth"])
 	left_camera_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["rgb","left_camera","left","l_c","_l/","/l_","_l_","cam","stereo"],["robot","base","wheel","finger","depth","_d_","right","_r_","/r_","_r/"])
 	right_camera_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["rgb","right_camera","right","r_c","_r/","/r_","_r_","cam","stereo"],["robot","base","wheel","finger","depth","_d_","left","_l_","/l_","_l/"])
 	depth_camera_frames = extract_parrent_and_child_frames(frames_dict,frames_roots,["world","odom"],["depth","_d_","_d/","/d_"],["robot","base"])
@@ -258,8 +328,15 @@ def create_file(bag_file_path):
 	assignments["camera_tf"] = range_by_cost(camera_frames, camera_costs)
 	assignments["camera_left_tf"] = range_by_cost(left_camera_frames, left_camera_costs)
 	assignments["camera_right_tf"] = range_by_cost(right_camera_frames, right_camera_costs)
-	assignments["camera_depth_tf"] = range_by_cost(depth_camera_frames, depth_camera_costs)
-	return json.dumps(assignments,separators=(',', ':'))
+	assignments["camera_depth_tf"] = range_by_cost(depth_camera_frames, depth_camera_costs)'''
+	return assignments
+
+def create_file(bag_file_path):
+	bag=rosbag.Bag(bag_file_path)
+	topics = extract_topics(bag)
+	assignments = match_topic_types(bag)
+	assignments = match_tf_types(bag, assignments)
+	return json.dumps(assignments, separators=(',', ':'))
 
 if __name__ == '__main__':
 	# usage:
