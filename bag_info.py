@@ -257,7 +257,7 @@ def match_tf_types(bag, assignments):
 	                                      wanted_world_frames, wanted_child_frames, unwanted_child_frames = ["hack"], #hack should be here
 	                                      frames_costs = {}):
 		tf_list = []
-		assignments[assignments_tf_item] = []
+		assignments[assignments_tf_item] = {}
 		for topic in assignments[assignments_item]:
 			tf_frame = extract_tf_frame(bag, topic)
 			#print ("222")
@@ -267,7 +267,7 @@ def match_tf_types(bag, assignments):
 			else:
 				#print (tf_frame)
 				frames = extract_parrent_and_child_frames(frames_dict, frames_roots, wanted_world_frames, [tf_frame])
-			assignments[assignments_tf_item].append(range_by_cost(frames, frames_costs))
+			assignments[assignments_tf_item][topic] = range_by_cost(frames, frames_costs)
 	frames_dict,frames_roots = tree_frames(bag)
 	# print_tree(frames_dict,frames_roots) #
 	
